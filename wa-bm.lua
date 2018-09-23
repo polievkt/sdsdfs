@@ -1,9 +1,9 @@
 --consts
-GCD_LAG = 0.3
-GCD = 1.5
+GCD_LAG = 0.1
+GCD = 1.34
 DEBUFF_RENEW_THRESH = 2
-FRENZY_EXPIRATION = 42
-POWER_CAP = 100
+FRENZY_EXPIRATION = 1.8
+POWER_CAP = 90
 
 FRENZY = 'Бешенство'
 BARBED = 'Разрывающий выстрел'
@@ -16,14 +16,12 @@ KILLC = 'Команда "Взять!"'
 MULTISHOT = 'Залп'
 PET = 'pet'
 PLAYER = 'player'
+TARGET = 'target'
 
-function canCast(spell_name)    
-    local exists = UnitExists("target")
+function canCast()    
+    local exists = UnitExists(TARGET)
     if (exists) then
-        local inRange = (IsSpellInRange(spell_name, "target") == 1) and true or false
-        if (inRange) then
             return true;
-        end
     end
 end
 
@@ -47,7 +45,7 @@ end
 
 function spellCD(spell)
     local startTime, duration = GetSpellCooldown(spell)
-    return startTime > 0 and GetTime()-(startTime+duration) or 0
+    return startTime > 0 and (startTime+duration - GetTime()) or 0
 end
 
 function auraDuration(unit, spell)
@@ -62,6 +60,7 @@ end
 
 function frenzyExpires()
     local frenzyDuration = auraDuration(PET, FRENZY)
+
     local expires = (frenzyDuration > 0 and frenzyDuration < FRENZY_EXPIRATION) and true or false
     return expires
 end
@@ -82,24 +81,73 @@ function powerOvercap()
 end
 
 
---final cast bools
-function castKillCommand()
-    if (canCast(KILLC)) then
-        return (spellCD(KILLC) < GCD) and true or false
-    end 
+
+
+function frenzyShouldBeRefreshedNextCast()
+
+    local frenzyDuration = auraDuration(PET, FRENZY)
+    local cd = spellCD(BARBED)
+
+    --frenzy will expire soon
+    if (frenzyDuration < 2) then
+        --if there is a chance for successfull cast until its really gone
+        if (frenzyDuration > cd + 0.2) then
+            return true
+        end
+    end
 end
 
-function castChimaera()
-    if (canCast(CHIMAERA) and not powerOvercap() and spellCD(CHIMAERA) < GCD_LAG) then
+function killcShouldBeNextCast()
+    local cd = spellCD(KILLC)
+    local realCD = cd - getGCDCD()
+    --print(realCD)
+    if (realCD < 0.5 ) then
         return true
+    end
+
+end
+
+function getTHP()
+    local hp = UnitHealth(TARGET)
+    local hpMax = UnitHealthMax(TARGET)
+    if (hp and hpMax) then
+        return hp/hpMax
+    else
+        return 0
+    end
+end
+
+function getGCDCD()
+    return spellCD(COBRA)
+end
+
+--final cast bools
+function castKillCommand()
+    --allow window for barbed
+    if (not frenzyShouldBeRefreshedNextCast() and canCast()) then
+        local cd = spellCD(KILLC)
+        --can immediately - why not?
+        if (cd <= 0.2) then
+            return true
+        end
+
+        if(killcShouldBeNextCast()) then
+            return true
+        end            
     end
 end
 
 function castBarbed()
+
     local cd = spellCD(BARBED)
-    if (canCast(BARBED) and cd < GCD) then
-        
-        if (frenzyExpires()) then
+    local realCD = cd - getGCDCD()
+
+    --if barbed can be next spell
+    if (canCast() and cd < 1.5) then
+
+        local frenzyDuration = auraDuration(PET, FRENZY)
+
+        if (frenzyShouldBeRefreshedNextCast()) then
             return true
         end
 
@@ -107,78 +155,108 @@ function castBarbed()
         if (stackOvercap(BARBED)) then
             return true
         end
- 
-        local moreImportantCastInQueue = false
-        if (castChimaera() or castKillCommand() or castWrath() or castAspect()) then
-            moreImportantCastInQueue = true
-        end
 
-        --and not castWrath()
-        if (barbedTwoStacksSoon() and not moreImportantCastInQueue) then
-            return true
-        end
-
-        local frenzyDuration = auraDuration(PET, FRENZY)
+        --no frenzy and wrath active
         local wrathDuration = auraDuration(PLAYER, WRATH)
-        if (frenzyDuration == 0 and wrathDuration > 0) then
+        if (frenzyDuration == 0) then
+            if (wrathDuration > 0) then
+                return true
+            end
+        end
+    end
+end
+
+
+function castChimaera()
+    if (canCast() and not powerOvercap()) then
+
+        local cd = spellCD(CHIMAERA)
+        local realCD = cd - getGCDCD()
+
+        if (not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast() and realCD <= 0.2 ) then
             return true
         end
-
     end
 end
 
 function castCrow()
-    if (canCast(CROW) and spellCD(CROW) < GCD) then
+    local thp = getTHP()
+
+    local cd = spellCD(CROW)
+    local realCD = cd - getGCDCD()
+
+    if (canCast() and realCD < 0.2 and thp > 0.20) then
         return true
     end
 end
 
 function castWrath()
-    if (canCast(WRATH) and spellCD(WRATH) < GCD) then
+    local cd = spellCD(WRATH)
+    local realCD = cd - getGCDCD()
+
+    if (canCast() and realCD < 0.2) then
         return true
     end
 end
 
 function castAspect()
-    if (canCast(ASPECT) and spellCD(ASPECT) < GCD) then
+    local cd = spellCD(ASPECT)
+    local realCD = cd - getGCDCD()
+
+    if (canCast() and realCD < 0.2) then
         return true
     end
+
 end
 
 function castCobra()
-    if (canCast(COBRA)) then   
-        local wrath_cd = spellCD(WRATH)
-        local killc_cd = spellCD(KILLC)
-        local crow_cd = spellCD(CROW)
+    local wrathDuration = auraDuration(PLAYER, WRATH)
+    local power = UnitPower(PLAYER)
+    local power_overcap = (power >= 80) and true or false
+    local wrathActive = wrathDuration > 0 and true or false   
+    local killc_cd = spellCD(KILLC)
+    local wrath_cd = spellCD(WRATH)
 
-        local power = UnitPower("player")
+    if (canCast() and not frenzyShouldBeRefreshedNextCast() and power_overcap ) then
+        return true
+    end  
 
-        local killc_approaches = (killc_cd < 3) and true or false
-        local wrath_approaches = (wrath_cd < 15) and true or false
-        local crow_approaches = (crow_cd < 10) and true or false
+    if (canCast() and not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast()) then
+        
+        if (wrathActive or power_overcap) then
 
-        local power_overcap = (power > 90) and true or false
 
-        local moreImportantCastInQueue = false
-        if (killc_approaches or wrath_approaches or crow_approaches) then
-            moreImportantCastInQueue = true
+            if (killc_cd > 1.5 and power > 35) then
+                return true
+            end
+
+        else
+
+            --до гнева далеко
+            local killc_approaches = (killc_cd < 1.3) and true or false
+            local wrath_approaches = (wrath_cd < 10) and true or false
+
+            if (not killc_approaches and not wrath_approaches) then
+                return true
+            end
+
         end
-
-        if (power_overcap or moreImportantCastInQueue) then 
-            return true
-        end 
     end
+
 end
 
 function castMultishot()
-    local count, duration, expirationTime = findAura("player", "Удар зверя")
-    
-    if (canCast(MULTISHOT)) then 
+    local power = UnitPower(PLAYER)
+    local cd = spellCD(MULTISHOT)
+
+    if (canCast()) then 
+        local count, duration, expirationTime = findAura("player", "Удар зверя")
+
         if (not count) then
             return true
         end
         
-        if (expirationTime - GetTime() < GCD_LAG ) then
+        if (expirationTime - GetTime() < 1 ) then
             return true
         end
     end
