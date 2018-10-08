@@ -42,7 +42,7 @@ function barbedOvercap(spell)
         return true
     end
 
-    if (currentCharges == 1 and (cooldownStart + cooldownDuration) - GetTime() > 0.2 ) then
+    if (currentCharges == 1 and (cooldownStart + cooldownDuration) - GetTime() < GCD ) then
         return true
     end
 
