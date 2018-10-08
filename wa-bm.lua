@@ -36,11 +36,16 @@ function findAura(unit, aura)
     return false;
 end
 
-function stackOvercap(spell)
-    currentCharges, maxCharges, _, _, _ = GetSpellCharges(spell)
+function barbedOvercap(spell)
+    local currentCharges, maxCharges, cooldownStart, , _ = GetSpellCharges(spell)
     if (currentCharges == maxCharges) then
         return true
     end
+
+    if (currentCharges == 1 and (cooldownStart + cooldownDuration) - GetTime() > 0.2 ) then
+        return true
+    end
+
 end
 
 function spellCD(spell)
@@ -152,7 +157,7 @@ function castBarbed()
         end
 
         --check if wrath on cd to utilize cd reduction?
-        if (stackOvercap(BARBED)) then
+        if (barbedOvercap(BARBED)) then
             return true
         end
 
@@ -160,9 +165,11 @@ function castBarbed()
         local wrathDuration = auraDuration(PLAYER, WRATH)
         if (frenzyDuration == 0) then
             if (wrathDuration > 0) then
+                print("wrath & no frenzy")
                 return true
             end
         end
+
     end
 end
 
@@ -217,23 +224,23 @@ function castCobra()
     local killc_cd = spellCD(KILLC)
     local wrath_cd = spellCD(WRATH)
 
-    if (canCast() and not frenzyShouldBeRefreshedNextCast() and power_overcap ) then
-        return true
-    end  
-
-    if (canCast() and not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast()) then
+    if (canCast() and not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast() ) then
+    
+        if (power_overcap ) then
+            return true
+        end  
+    
         
-        if (wrathActive or power_overcap) then
-
-
-            if (killc_cd > 1.5 and power > 35) then
+        if (wrathActive) then
+            
+            if (killc_cd > 2.3) then
                 return true
             end
-
+        
         else
 
             --до гнева далеко
-            local killc_approaches = (killc_cd < 1.3) and true or false
+            local killc_approaches = (killc_cd < 2.3) and true or false
             local wrath_approaches = (wrath_cd < 10) and true or false
 
             if (not killc_approaches and not wrath_approaches) then
@@ -241,6 +248,7 @@ function castCobra()
             end
 
         end
+    
     end
 
 end
