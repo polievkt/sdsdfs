@@ -1,10 +1,10 @@
---v1
+--v17
 --consts
 GCD_LAG = 0.1
-GCD = 1.34
+GCD = 1.24
 DEBUFF_RENEW_THRESH = 2
 FRENZY_EXPIRATION = 1.8
-POWER_CAP = 90
+POWER_CAP = 85
 
 FRENZY = 'Бешенство'
 BARBED = 'Разрывающий выстрел'
@@ -43,51 +43,33 @@ function barbedOvercap(spell)
         return true
     end
 
-    if (currentCharges == 1 and (cooldownStart + cooldownDuration) - GetTime() < GCD ) then
+    if (currentCharges == 1 and (cooldownStart + cooldownDuration) - GetTime() < GCD*1.5  ) then
         return true
     end
 
 end
 
+--remaining cd
 function spellCD(spell)
     local startTime, duration = GetSpellCooldown(spell)
-    return startTime > 0 and (startTime+duration - GetTime()) or 0
+    if (startTime) then
+        return startTime > 0 and (startTime+duration - GetTime()) or 0
+    else 
+        return 0
+    end
+
 end
 
+--remaining duration
 function auraDuration(unit, spell)
     local count, duration, expirationTime = findAura(unit, spell)
     if (count and count > 0) then 
-        local duration = expirationTime - GetTime()
-        return duration
+        local result = expirationTime - GetTime()
+        return result
     else
         return 0
     end
 end
-
-function frenzyExpires()
-    local frenzyDuration = auraDuration(PET, FRENZY)
-
-    local expires = (frenzyDuration > 0 and frenzyDuration < FRENZY_EXPIRATION) and true or false
-    return expires
-end
-
-function barbedTwoStacksSoon()
-    local currentCharges, maxCharges, cooldownStart, cooldownDuration, _ = GetSpellCharges(BARBED)
-    local cdFinishAt = cooldownStart + cooldownDuration
-    local cdEndSoon = (cooldownStart + cooldownDuration - GetTime() < FRENZY_EXPIRATION )  and true or false
-    if (currentCharges == 1 and GetTime() > - GCD*1.5) then
-        return true
-    end
-end
-
-function powerOvercap()
-    if (UnitPower(PLAYER) >= POWER_CAP) then
-        return true
-    end
-end
-
-
-
 
 function frenzyShouldBeRefreshedNextCast()
 
@@ -95,9 +77,9 @@ function frenzyShouldBeRefreshedNextCast()
     local cd = spellCD(BARBED)
 
     --frenzy will expire soon
-    if (frenzyDuration < 2) then
+    if (frenzyDuration > 0 and frenzyDuration < FRENZY_EXPIRATION) then
         --if there is a chance for successfull cast until its really gone
-        if (frenzyDuration > cd + 0.2) then
+        if (frenzyDuration > cd + GCD_LAG) then
             return true
         end
     end
@@ -107,7 +89,7 @@ function killcShouldBeNextCast()
     local cd = spellCD(KILLC)
     local realCD = cd - getGCDCD()
     --print(realCD)
-    if (realCD < 0.5 ) then
+    if (realCD < GCD) then
         return true
     end
 
@@ -129,43 +111,63 @@ end
 
 --final cast bools
 function castKillCommand()
-    --allow window for barbed
-    if (not frenzyShouldBeRefreshedNextCast() and canCast()) then
-        local cd = spellCD(KILLC)
-        --can immediately - why not?
-        if (cd <= 0.2) then
-            return true
-        end
-
+    if (canCast()) then
         if(killcShouldBeNextCast()) then
             return true
         end            
     end
 end
 
-function castBarbed()
+FRENZY_UP_AT = 0
+function logFrenzy()
+    local frenzyIsUp = auraDuration(PET, FRENZY) > 0 and true or false
+    
+    if (frenzyIsUp) then
+        if (FRENZY_UP_AT == 0) then
+            --frenzy just got up
+            FRENZY_UP_AT = GetTime()
+            print("Frenzy up at", FRENZY_UP_AT)
+        else
+            --frenzy already up
+        end
+    
+    else
+        if (FRENZY_UP_AT == 0) then
+            --frenzy down and was down
+        else
+            --frenzy down and was up, just came down
+            print("Frenzy down in", GetTime() - FRENZY_UP_AT)
+            print("Frenzy down @", GetTime())
+            FRENZY_UP_AT = 0
+        end
+    end
 
+
+end
+
+
+function castBarbed()
+    --logFrenzy()
     local cd = spellCD(BARBED)
     local realCD = cd - getGCDCD()
 
     --if barbed can be next spell
-    if (canCast() and cd < 1.5) then
-
-        local frenzyDuration = auraDuration(PET, FRENZY)
+    if (canCast()) then
 
         if (frenzyShouldBeRefreshedNextCast()) then
             return true
         end
 
+        local frenzyDuration = auraDuration(PET, FRENZY)
         --check if wrath on cd to utilize cd reduction?
-        if (barbedOvercap(BARBED)) then
+        if (barbedOvercap(BARBED) and not killcShouldBeNextCast()) then
             return true
         end
 
         --no frenzy and wrath active
         local wrathDuration = auraDuration(PLAYER, WRATH)
         if (frenzyDuration == 0) then
-            if (wrathDuration > 0) then
+            if (wrathDuration > 0 and realCD < GCD_LAG) then
                 return true
             end
         end
@@ -174,12 +176,12 @@ end
 
 
 function castChimaera()
-    if (canCast() and not powerOvercap()) then
+    if (canCast() and not  (UnitPower(PLAYER) >= POWER_CAP)) then
 
         local cd = spellCD(CHIMAERA)
         local realCD = cd - getGCDCD()
 
-        if (not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast() and realCD <= 0.2 ) then
+        if (not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast() and realCD <= GCD_LAG ) then
             return true
         end
     end
@@ -191,7 +193,7 @@ function castCrow()
     local cd = spellCD(CROW)
     local realCD = cd - getGCDCD()
 
-    if (canCast() and realCD < 0.2 and thp > 0.20) then
+    if (canCast() and realCD < GCD_LAG and thp > 0.20) then
         return true
     end
 end
@@ -200,7 +202,7 @@ function castWrath()
     local cd = spellCD(WRATH)
     local realCD = cd - getGCDCD()
 
-    if (canCast() and realCD < 0.2) then
+    if (canCast() and realCD < GCD_LAG) then
         return true
     end
 end
@@ -209,7 +211,7 @@ function castAspect()
     local cd = spellCD(ASPECT)
     local realCD = cd - getGCDCD()
 
-    if (canCast() and realCD < 0.2) then
+    if (canCast() and realCD < GCD_LAG) then
         return true
     end
 
@@ -218,19 +220,18 @@ end
 function castCobra()
     local wrathDuration = auraDuration(PLAYER, WRATH)
     local power = UnitPower(PLAYER)
-    local power_overcap = (power >= 80) and true or false
+    local power_overcap = (power >= POWER_CAP) and true or false
     local wrathActive = wrathDuration > 0 and true or false   
     local killc_cd = spellCD(KILLC)
     local wrath_cd = spellCD(WRATH)
 
-    if (canCast() and not frenzyShouldBeRefreshedNextCast() and power_overcap ) then
-        return true
-    end  
-
     if (canCast() and not frenzyShouldBeRefreshedNextCast() and not killcShouldBeNextCast()) then
         
-        if (wrathActive or power_overcap) then
+        if (power_overcap) then
+            return true
+        end
 
+        if (wrathActive ) then
 
             if (killc_cd > 1.5 and power > 35) then
                 return true
@@ -239,7 +240,7 @@ function castCobra()
         else
 
             --до гнева далеко
-            local killc_approaches = (killc_cd < 1.3) and true or false
+            local killc_approaches = (killc_cd < 1.5) and true or false
             local wrath_approaches = (wrath_cd < 10) and true or false
 
             if (not killc_approaches and not wrath_approaches) then
@@ -262,9 +263,187 @@ function castMultishot()
             return true
         end
         
-        if (expirationTime - GetTime() < 1 ) then
+        if (expirationTime - GetTime() < GCD ) then
             return true
         end
     end
 
+end
+
+--####
+--surv
+--####
+--v1
+
+--sting_const
+STING = 'Укус змеи'
+VIPER_PROC = 'Яд гадюки'
+CLIP = 'Подрезать крылья'
+FIREWORKS = 'Фейерверк'
+EAGLE = 'Дух орла'
+FEROMON_BOMB = 'Феромоновая бомба'
+UNSTABLE_BOMB = 'Нестабильная бомба'
+SHRAPNEL_BOMB = 'Шрапнельная бомба'
+COORDINATED = 'Согласованная атака'
+POWER_COST_LAG = 3
+STING_EXPIRATION = 3
+CLIP_EXPIRATION = 3
+SURV_POWER_CAP = 100 - (15 + POWER_COST_LAG)
+FEROMON_BOMB_ENABLED = 0
+UNSTABLE_BOMB_ENABLED = 1
+SHRAPNEL_BOMB_ENABLED = 2
+
+function debuffDuration(unit, spell)
+    for i = 0, 40 do
+        local name, _, count, _, duration, expirationTime, _, _, _, _  = UnitDebuff(unit, i);
+
+        if (name == spell and expirationTime) then 
+            local result = expirationTime - GetTime()
+            return result
+        end
+    end
+    return 0
+end
+
+function buffDuration(unit, spell)
+    for i = 0, 40 do
+        local name, _, count, _, duration, expirationTime, _, _, _, _  = UnitBuff(unit, i);
+
+        if (name == spell and expirationTime) then 
+            local result = expirationTime - GetTime()
+            return result
+        end
+    end
+    return 0
+end
+
+function inMelee(unit)
+    if (IsSpellInRange(CLIP, unit) == 1) then
+        return true
+    end 
+end
+
+function targetInMelee()
+    if (inMelee(TARGET)) then
+        return true
+    end 
+end
+
+--cast bools
+function castSting()
+    local sting_cost = 20 - POWER_COST_LAG
+    local power = UnitPower(PLAYER)
+    if (canCast() and power >= sting_cost) then
+        local sting_debuff_duration = debuffDuration(TARGET, STING)
+        --print(sting_debuff_duration)
+        local sting_expires = (sting_debuff_duration < STING_EXPIRATION) and true or false
+        
+        local viper_proc_duration = buffDuration(PLAYER, VIPER_PROC)
+        local sting_cd = spellCD(STING)
+        local viper_proc_up = viper_proc_duration > sting_cd
+
+        --print(sting_expires, viper_proc_up)
+        if (sting_expires or viper_proc_up) then
+            return true
+        end
+    end
+end
+
+function castClip()
+    local clip_cost = 30 - POWER_COST_LAG
+    local power = UnitPower(PLAYER)
+
+    if (canCast() and power >= clip_cost and targetInMelee()) then
+        local clip_duration = debuffDuration(TARGET, CLIP)
+        local clip_expires = clip_duration < CLIP_EXPIRATION and true or false
+        if (clip_expires) then
+            return true
+        end
+    end
+end
+
+function castKillc()
+    local killc_cd = spellCD(KILLC)
+    local gcd = spellCD(FIREWORKS)
+    local real_cd = killc_cd - gcd
+    local power = UnitPower(PLAYER)
+    
+    if (real_cd < GCD_LAG and power < SURV_POWER_CAP and canCast()) then
+        return true
+    end
+end
+
+function castGoose()
+    local goose_cost = 30 - POWER_COST_LAG
+    local power = UnitPower(PLAYER)
+
+    if (power >= goose_cost and canCast()) then
+        local eagle_up =  buffDuration(PLAYER, EAGLE) > 0 and true or false
+        if (targetInMelee() or eagle_up) then
+            return true
+        end
+    end
+end
+
+function evalBomb()
+
+    local f_start, f_duration, feromon_enabled = GetSpellCooldown(FEROMON_BOMB)
+    local u_start, u_duration, unstable_enabled = GetSpellCooldown(UNSTABLE_BOMB)
+    local s_start, s_duration, shrapnel_enabled = GetSpellCooldown(SHRAPNEL_BOMB)
+
+    if (feromon_enabled) then return FEROMON_BOMB end
+    if (unstable_enabled) then return UNSTABLE_BOMB end
+    if (shrapnel_enabled) then return SHRAPNEL_BOMB end
+
+end
+
+function castBomb()
+    local current_bomb = evalBomb()
+    local currentCharges, maxCharges, cooldownStart, cooldownDuration, _ = GetSpellCharges(current_bomb)
+    local power = UnitPower(PLAYER)
+    if ((currentCharges > 0 or  cooldownStart+cooldownDuration - GetTime() < GCD_LAG) and canCast()) then
+
+        if (currentCharges > 1) then 
+            return true
+        end
+
+        --bomb ready
+        if (current_bomb == SHRAPNEL_BOMB and power > 60) then
+            return true
+        end
+
+        local sting_debuff_duration = debuffDuration(TARGET, STING)
+        local sting_expires = (sting_debuff_duration > 0 and sting_debuff_duration < STING_EXPIRATION*2) and true or false
+        if (current_bomb == UNSTABLE_BOMB and sting_expires) then
+            return true
+        end
+
+        if (current_bomb == FEROMON_BOMB and power < 30) then 
+            return true
+        end
+    end
+
+end
+
+function castCoordinated()
+
+    local coord_cd = spellCD(COORDINATED)
+    local gcd = spellCD(FIREWORKS)
+    local real_cd = coord_cd - gcd
+
+    if (canCast() and real_cd <= GCD_LAG) then 
+        return true
+    end
+
+end
+
+function castCrow2()
+
+    local cd = spellCD(CROW)
+    local realCD = cd - spellCD(FIREWORKS)
+    --print(realCD)
+
+    if (canCast() and realCD < GCD_LAG ) then
+        return true
+    end
 end
