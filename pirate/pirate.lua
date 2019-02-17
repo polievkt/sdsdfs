@@ -58,12 +58,12 @@ end
 local DICE = "Бросок костей"
 
 --buffs
-local BEARING = "True Bearing"
-local PRECISION = "Ruthless precision"
-local SKULL = "Skull and crossbones"
-local MELEE = "Grand Melee"
-local BROADSIDE = "Broadside"
-local THREASURE = "Buried Threasure"
+local BEARING = "Истинный азимут"
+local PRECISION = "Беспощадная точность"
+local SKULL = "Череп с костями"
+local MELEE = "Великая битва"
+local BROADSIDE = "Бортовой залп"
+local THREASURE = "Зарытое сокровище"
 
 local DICE_BUFFS = {BEARING, PRECISION, SKULL, MELEE, BROADSIDE, THREASURE}
 
@@ -369,3 +369,5 @@ test_pandemicDiceReady()
 test_doDice()
 
 
+--TODO:
+--1. keep an eye for precision requirement @ pistol
